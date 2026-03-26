@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>ระบบเบิก-คืนอุปกรณ์ V3.2</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body { background-color: #f0f2f5; font-family: sans-serif; }
+      .container { max-width: 600px; padding-bottom: 50px; }
+      .page { display: none; }
+      .page.active { display: block; }
+      .card { border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-radius: 12px;}
+      .btn-menu { padding: 1.25rem; font-size: 1.1rem; font-weight: bold; }
+      #reader-employee, #reader-device, #reader-general { width: 100%; border-radius: 8px; }
+      .spinner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255, 255, 255, 0.7); z-index: 9999; display: none; justify-content: center; align-items: center; }
+      #camera-feed, #photo-preview { width: 100%; max-width: 500px; height: auto; border-radius: 8px; border: 1px solid #dee2e6; }
+      .scorecard { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; }
+      .scorecard h2 { margin: 0; font-size: 24px; font-weight: bold; }
+      .scorecard p { margin: 0; color: #6c757d; font-size: 14px; }
+      .table-responsive { max-height: 300px; overflow-y: auto; }
+      .table th { position: sticky; top: 0; background: white; }
+    </style>
+</head>
+<body>
+    <div class="spinner-overlay" id="spinner-overlay">
+      <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
+    </div>
+
+    <div class="container my-4">
+      <div class="card">
+        <div class="card-body p-4">
+
+          <div id="page-login" class="page active">
+            <h1 class="card-title text-center mb-4"><i class="bi bi-box-seam"></i> ระบบเบิก-คืนอุปกรณ์</h1>
+            <p class="text-center text-muted mb-4">สำหรับแผนก Inbound V3.2</p>
+            <div class="form-floating mb-3"><input type="text" class="form-control" id="username" placeholder="Username"><label for="username">ชื่อผู้ใช้</label></div>
+            <div class="form-floating mb-3"><input type="password" class="form-control" id="password" placeholder="Password"><label for="password">รหัสผ่าน</label></div>
+            <button class="btn btn-primary w-100 btn-lg" onclick="handleLogin()">เข้าสู่ระบบ</button>
+            <p id="login-error" class="text-danger text-center mt-3"></p>
+          </div>
+
+          <div id="page-main-menu" class="page">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+               <h1 class="card-title mb-0">เมนูหลัก</h1>
+               <div class="text-end">
+                  <span id="user-display" class="d-block text-muted small"></span>
+                  <button class="btn btn-sm btn-outline-danger mt-1" onclick="logout()"><i class="bi bi-box-arrow-left"></i> ออก</button>
+               </div>
+            </div>
+            <div class="d-grid gap-3">
+              <button class="btn btn-dark btn-menu" onclick="loadDashboard()"><i class="bi bi-graph-up"></i> Dashboard</button>
+              <button class="btn btn-primary btn-menu" onclick="startProcess('Check-Out')">เบิกใช้งานอุปกรณ์</button>
+              <button class="btn btn-success btn-menu" onclick="startProcess('Check-In')">ส่งคืนอุปกรณ์</button>
+              <button class="btn btn-info btn-menu" onclick="showPage('page-add-menu')">เพิ่มอุปกรณ์เข้าระบบ</button>
+              <button class="btn btn-danger btn-menu" onclick="showPage('page-remove-menu')">นำอุปกรณ์ออกจากระบบ</button>
+              <button class="btn btn-secondary btn-menu" onclick="loadSettings()"><i class="bi bi-gear"></i> ตั้งค่าระบบ</button>
+            </div>
+          </div>
+
+          <div id="page-dashboard" class="page">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h3 class="mb-0">Dashboard</h3>
+              <button class="btn btn-sm btn-secondary" onclick="showPage('page-main-menu')">กลับ</button>
+            </div>
+            
+            <div class="row g-2 mb-3">
+              <div class="col-6"><div class="scorecard border-primary text-primary"><h2><span id="dash-total">-</span></h2><p>เครื่องทั้งหมด</p></div></div>
+              <div class="col-6"><div class="scorecard border-success text-success"><h2><span id="dash-available">-</span></h2><p>พร้อมใช้งาน</p></div></div>
+              <div class="col-6"><div class="scorecard border-warning text-warning"><h2><span id="dash-inuse">-</span></h2><p>กำลังใช้งาน</p></div></div>
+              <div class="col-6"><div class="scorecard border-danger text-danger"><h2><span id="dash-issue">-</span></h2><p>มีปัญหา/ส่งซ่อม/หาย</p></div></div>
+            </div>
+
+            <div class="mb-4">
+               <canvas id="deviceChart" height="200"></canvas>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+               <h5 class="mb-0">รายการล่าสุด 50 รายการ</h5>
+               <button class="btn btn-sm btn-outline-success" onclick="exportToCSV()"><i class="bi bi-filetype-csv"></i> Export CSV</button>
+            </div>
+            <div class="table-responsive border rounded">
+              <table class="table table-sm table-striped mb-0" style="font-size: 13px;">
+                <thead><tr><th>วันที่</th><th>พนักงาน</th><th>อุปกรณ์</th><th>รายการ</th><th>สถานะการคืน</th></tr></thead>
+                <tbody id="dashboard-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="page-settings" class="page">
+            <h3 class="mb-3"><i class="bi bi-gear"></i> ตั้งค่าระบบ</h3>
+            <div class="p-3 bg-white border rounded shadow-sm mb-3">
+              <h5 class="text-primary mb-3">การแจ้งเตือนอีเมล (ใบสอบสวน)</h5>
+              <div class="form-floating mb-3">
+                 <textarea class="form-control" id="setting-default-emails" style="height: 120px"></textarea>
+                 <label>อีเมลผู้รับเริ่มต้น (คั่นด้วย ,)</label>
+              </div>
+              <button class="btn btn-primary w-100" onclick="saveSettings()">บันทึกการตั้งค่า</button>
+            </div>
+            <button class="btn btn-secondary mt-3 w-100" onclick="showPage('page-main-menu')">กลับไปเมนูหลัก</button>
+          </div>
+
+          <div id="page-add-menu" class="page">
+            <h3 class="mb-3">เพิ่มอุปกรณ์เข้าสู่ระบบ</h3>
+            <div class="d-grid gap-3">
+              <button class="btn btn-info btn-menu" onclick="startProcess('Add', 'repaired')">บันทึกอุปกรณ์หลังซ่อม</button>
+              <button class="btn btn-info btn-menu" onclick="startProcess('Add', 'new')">บันทึกอุปกรณ์ใหม่</button>
+            </div>
+            <button class="btn btn-secondary mt-3 w-100" onclick="showPage('page-main-menu')">กลับ</button>
+          </div>
+          
+          <div id="page-remove-menu" class="page">
+            <h3 class="mb-3">นำอุปกรณ์ออกจากระบบ</h3>
+            <div class="d-grid gap-3">
+              <button class="btn btn-warning btn-menu" onclick="startProcess('Remove', 'repair')">ส่งซ่อมบำรุง</button>
+              <button class="btn btn-secondary btn-menu" onclick="startProcess('Remove', 'transfer')">โอนย้ายทรัพย์สิน</button>
+              <button class="btn btn-danger btn-menu" onclick="startProcess('Remove', 'lost')">แจ้งสูญหาย</button>
+            </div>
+            <button class="btn btn-secondary mt-3 w-100" onclick="showPage('page-main-menu')">กลับ</button>
+          </div>
+
+          <div id="page-scan-employee" class="page">
+            <h3 id="scan-employee-title"></h3>
+            <p class="text-muted">ขั้นตอนที่ 1: สแกน QR Code พนักงาน</p>
+            <div id="reader-employee"></div>
+            <button class="btn btn-secondary mt-3 w-100" onclick="showPage('page-main-menu')">กลับ</button>
+          </div>
+          
+          <div id="page-device-input" class="page">
+               <h3 id="device-input-title"></h3>
+               <div class="p-3 rounded mb-3 bg-light"><strong>พนักงาน:</strong> <span id="display-employee-name"></span></div>
+               <div id="device-scan-area" style="display:none;"><p class="text-muted">ขั้นตอนที่ 2: สแกน QR Code อุปกรณ์</p><div id="reader-device"></div></div>
+               <div id="device-add-area" style="display:none;"><p class="text-muted">ขั้นตอนที่ 2: กรอกข้อมูลอุปกรณ์</p>
+                  <div class="form-floating mb-2"><input type="text" class="form-control" id="new-device-sn" placeholder="Serial Number"><label>Serial Number</label></div>
+                  <div class="form-floating"><input type="text" class="form-control" id="new-device-name" placeholder="ชื่อ/รุ่นอุปกรณ์"><label>ชื่อ/รุ่นอุปกรณ์</label></div>
+                  <button class="btn btn-primary mt-3 w-100" onclick="handleNewDeviceInput()">ยืนยัน</button>
+               </div>
+               <button class="btn btn-secondary mt-3 w-100" onclick="showPage('page-scan-employee')">ย้อนกลับ</button>
+          </div>
+
+          <div id="page-general-scan" class="page">
+            <h3 id="general-scan-title"></h3>
+            <p class="text-muted">ขั้นตอนที่ 1: สแกน QR Code บนอุปกรณ์</p>
+            <div id="reader-general"></div>
+            <button id="general-scan-back-button" class="btn btn-secondary mt-3 w-100">กลับ</button>
+          </div>
+
+          <div id="page-repair-form" class="page">
+            <h3 class="mb-3">ส่งซ่อมบำรุง</h3>
+            <div class="p-3 rounded mb-3 bg-light"><strong>อุปกรณ์:</strong> <span id="repair-device-info"></span></div>
+            <div class="form-floating mb-2"><input type="text" class="form-control" id="repair-department" placeholder="แผนกที่รับซ่อม"><label>แผนกที่รับซ่อม</label></div>
+            <div class="form-floating mb-2"><input type="text" class="form-control" id="repair-recipient" placeholder="ชื่อผู้รับซ่อม"><label>ชื่อผู้รับซ่อม</label></div>
+            <div class="form-floating mb-2"><input type="email" class="form-control" id="repair-emails" placeholder="อีเมล"><label>อีเมลผู้เกี่ยวข้อง (คั่นด้วย ,)</label></div>
+            <div class="form-floating mb-2"><textarea class="form-control" id="repair-details" style="height: 100px" placeholder="รายละเอียด"></textarea><label>รายละเอียด</label></div>
+            <button class="btn btn-primary w-100" onclick="submitGeneralForm('repair')">ยืนยันการส่งซ่อม</button>
+            <button class="btn btn-secondary mt-2 w-100" onclick="showPage('page-remove-menu')">ยกเลิก</button>
+          </div>
+
+          <div id="page-transfer-form" class="page">
+            <h3 class="mb-3">โอนย้ายทรัพย์สิน</h3>
+            <div class="p-3 rounded mb-3 bg-light"><strong>อุปกรณ์:</strong> <span id="transfer-device-info"></span></div>
+            <div class="form-floating mb-2"><input type="text" class="form-control" id="transfer-department" placeholder="แผนก"><label>แผนกที่รับโอน</label></div>
+            <div class="form-floating mb-2"><input type="text" class="form-control" id="transfer-recipient" placeholder="ชื่อ"><label>ชื่อผู้รับทรัพย์สิน</label></div>
+            <div class="form-floating mb-2"><input type="email" class="form-control" id="transfer-emails" placeholder="อีเมล"><label>อีเมลผู้เกี่ยวข้อง (คั่นด้วย ,)</label></div>
+            <div class="form-floating mb-2"><textarea class="form-control" id="transfer-details" style="height: 100px" placeholder="รายละเอียด"></textarea><label>รายละเอียด</label></div>
+            <button class="btn btn-primary w-100" onclick="submitGeneralForm('transfer')">ยืนยัน</button>
+            <button class="btn btn-secondary mt-2 w-100" onclick="showPage('page-remove-menu')">ยกเลิก</button>
+          </div>
+
+          <div id="page-lost-input" class="page">
+            <h3 class="mb-3">แจ้งสูญหาย</h3>
+            <div class="p-3 rounded mb-3 bg-light"><strong>ผู้แจ้ง:</strong> <span id="display-employee-name-lost"></span></div>
+            <div class="form-floating mb-2"><input type="text" class="form-control" id="lost-device-sn" placeholder="Serial Number"><label>Serial Number</label></div>
+            <div class="form-floating mb-2"><input type="text" class="form-control" id="lost-device-name" placeholder="ชื่ออุปกรณ์"><label>ชื่อ/รุ่นอุปกรณ์</label></div>
+            <button class="btn btn-primary mt-3 w-100" onclick="handleLostDeviceInput()">ดำเนินการต่อ</button>
+            <button class="btn btn-secondary mt-2 w-100" onclick="showPage('page-scan-employee')">ย้อนกลับ</button>
+          </div>
+
+          <div id="page-confirm" class="page">
+            <h3 class="mb-3">ยืนยันการทำรายการ</h3>
+            <ul class="list-group mb-3">
+              <li class="list-group-item"><strong>ประเภท:</strong> <span id="confirm-mode"></span></li>
+              <li class="list-group-item"><strong>พนักงาน:</strong> <span id="confirm-employee"></span></li>
+              <li class="list-group-item"><strong>อุปกรณ์:</strong> <span id="confirm-device-name"></span> (<span id="confirm-device-sn"></span>)</li>
+              <li class="list-group-item" id="condition-list-item" style="display:none;"><strong>สภาพเดิม:</strong> <span id="confirm-device-condition" class="fw-bold text-primary"></span></li>
+            </ul>
+            
+            <div id="checklist-area" style="display:none;">
+              <h5 class="mt-4 mb-3">ตรวจสอบสภาพอุปกรณ์</h5>
+              <div class="row">
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check1"><label class="form-check-label" for="check1">หน้าจอชำรุด</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check5"><label class="form-check-label" for="check5">Battery เสื่อม</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check2"><label class="form-check-label" for="check2">ขอบยางเสื่อม</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check6"><label class="form-check-label" for="check6">จอสัมผัสไม่ทำงาน</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check3"><label class="form-check-label" for="check3">ปุ่มกดชำรุด</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check7"><label class="form-check-label" for="check7">Software Error</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check4"><label class="form-check-label" for="check4">เปิดเครื่องไม่ได้</label></div></div>
+                <div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="check8"><label class="form-check-label" for="check8">อุบัติเหตุอื่นๆ</label></div></div>
+              </div>
+            </div>
+
+            <div id="employee-fault-area" class="mt-4 p-3 border rounded" style="display:none; background-color: #fff8e1;">
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="employee-fault-checkbox" checked><label class="form-check-label" for="employee-fault-checkbox"><strong>เป็นความผิดของพนักงาน</strong></label></div>
+            </div>
+            
+            <div class="form-floating my-3"><textarea class="form-control" placeholder="หมายเหตุ" id="remark" style="height: 100px"></textarea><label for="remark">หมายเหตุ</label></div>
+            <button class="btn btn-primary w-100 mb-2" onclick="submitTransaction()">บันทึกข้อมูล</button>
+            <button class="btn btn-secondary w-100" onclick="showPage('page-device-input')">ย้อนกลับ</button>
+          </div>
+
+          <div id="page-photo-capture" class="page">
+            <h3 class="mb-3">ถ่ายรูปประกอบ</h3>
+            <div class="text-center my-3"><video id="camera-feed" playsinline autoplay></video><img id="photo-preview" class="d-none" alt="Photo Preview"><canvas id="photo-canvas" class="d-none"></canvas></div>
+            <div id="capture-controls"><button class="btn btn-primary w-100 mb-2" onclick="capturePhoto()">ถ่ายรูป</button></div>
+            <div id="confirm-controls" class="d-none"><button class="btn btn-success w-100 mb-2" onclick="confirmPhoto()">ยืนยันรูปภาพ</button><button class="btn btn-secondary w-100" onclick="retakePhoto()">ถ่ายใหม่</button></div>
+          </div>
+
+          <div id="page-investigation" class="page">
+               <h3 class="mb-3">กรอกข้อมูลใบสอบสวน</h3>
+               <ul class="list-group mb-3"><li class="list-group-item"><strong>พนักงาน:</strong> <span id="investigation-employee"></span></li><li class="list-group-item"><strong>อุปกรณ์:</strong> <span id="investigation-device"></span></li></ul>
+               <div class="form-floating mb-3"><input type="text" class="form-control" id="investigation-location" placeholder="สถานที่"><label>สถานที่เกิดเหตุ/สูญหาย</label></div>
+               <div class="form-floating mb-3"><input type="text" class="form-control" id="supervisor-interviewee" placeholder="หัวหน้างาน"><label>หัวหน้างานผู้ร่วมสอบสวน</label></div>
+               <div class="form-floating mb-3"><input type="text" class="form-control" id="recipient-emails" placeholder="อีเมล"><label>อีเมลผู้เกี่ยวข้อง (คั่นด้วย ,)</label></div>
+               <div class="form-floating mb-3"><textarea class="form-control" placeholder="รายละเอียด" id="interview-details" style="height: 100px"></textarea><label>รายละเอียดการให้สัมภาษณ์</label></div>
+               <div class="form-floating mb-3"><input type="text" class="form-control" id="investigation-cause" placeholder="สาเหตุ"><label>สาเหตุที่สันนิษฐาน</label></div>
+               <button class="btn btn-primary w-100 mb-2" onclick="submitInvestigation()">สร้างและส่งเอกสาร</button>
+               <button class="btn btn-secondary w-100" onclick="showPage('page-confirm')">ย้อนกลับ</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
+    <script>
+      // ==========================================
+      // ตั้งค่า URL ของ Google Apps Script ที่ Deploy ไว้
+      // ==========================================
+      const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzRBPN941kZdt6sJQkRBxygQNtIFnYMJyRd6BxZyNeoxvU8F4D96LoX9xg11-DRsgMu/exec"; 
+
+      let state = {};
+      let employeeScanner, deviceScanner, generalScanner, cameraStream;
+      let chartInstance = null;
+      window.dashboardTableData = [];
+
+      // ==========================================
+      // API CALLER (ทดแทน google.script.run)
+      // ==========================================
+      async function callAPI(action, dataObj = {}) {
+        try {
+          const response = await fetch(GAS_WEB_APP_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: action, data: dataObj }),
+            // ใช้ text/plain เพื่อป้องกันปัญหา CORS Preflight
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+          });
+          return await response.json();
+        } catch (error) {
+          console.error("API Error:", error);
+          return { success: false, message: "Network Error: ไม่สามารถเชื่อมต่อกับ Server ได้" };
+        }
+      }
+
+      function showPage(pageId) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById(pageId).classList.add('active');
+        stopAllScanners();
+        stopCamera();
+      }
+
+      function showSpinner(show) { document.getElementById('spinner-overlay').style.display = show ? 'flex' : 'none'; }
+
+      // ==========================================
+      // FEATURES 
+      // ==========================================
+      
+      async function handleLogin() {
+        const u = document.getElementById('username').value.trim();
+        const p = document.getElementById('password').value.trim();
+        if (!u || !p) return;
+        
+        showSpinner(true);
+        const res = await callAPI('checkUserLogin', { username: u, password: p });
+        
+        if (res.success) { 
+            state.username = u;
+            const nameRes = await callAPI('getSupervisorName', { username: u });
+            document.getElementById('user-display').innerText = `ผู้ใช้งาน: ${nameRes}`;
+            showPage('page-main-menu');
+        } else { 
+            document.getElementById('login-error').innerText = res.message; 
+        }
+        showSpinner(false);
+      }
+
+      function logout() {
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
+        state = {};
+        showPage('page-login');
+      }
+
+      // --- Dashboard Functions ---
+      async function loadDashboard() {
+        showSpinner(true);
+        const res = await callAPI('getDashboardData');
+        showSpinner(false);
+        if(!res.success) return alert("ไม่สามารถโหลดข้อมูล Dashboard ได้");
+        
+        // Update Scorecards
+        document.getElementById('dash-total').innerText = res.scorecards.total;
+        document.getElementById('dash-available').innerText = res.scorecards.available;
+        document.getElementById('dash-inuse').innerText = res.scorecards.inUse;
+        document.getElementById('dash-issue').innerText = res.scorecards.damaged + res.scorecards.repairing + res.scorecards.lost;
+
+        // Draw Chart
+        const ctx = document.getElementById('deviceChart').getContext('2d');
+        if (chartInstance) chartInstance.destroy();
+        chartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Available', 'In Use', 'Damaged', 'Repairing', 'Lost'],
+                datasets: [{
+                    data: [res.scorecards.available, res.scorecards.inUse, res.scorecards.damaged, res.scorecards.repairing, res.scorecards.lost],
+                    backgroundColor: ['#198754', '#ffc107', '#dc3545', '#0dcaf0', '#212529']
+                }]
+            },
+            options: { maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+        });
+
+        // Populate Table
+        window.dashboardTableData = res.tableData;
+        const tbody = document.getElementById('dashboard-table-body');
+        tbody.innerHTML = '';
+        res.tableData.forEach(row => {
+           let tr = document.createElement('tr');
+           tr.innerHTML = `<td>${row.date}</td><td>${row.employee}</td><td>${row.device}<br><small class="text-muted">${row.sn}</small></td><td>${row.action}</td><td>${row.status}</td>`;
+           tbody.appendChild(tr);
+        });
+
+        showPage('page-dashboard');
+      }
+
+      function exportToCSV() {
+        if (window.dashboardTableData.length === 0) return alert("ไม่มีข้อมูล");
+        let csv = "data:text/csv;charset=utf-8,\uFEFF"; // Support Thai
+        csv += "วันที่,พนักงาน,อุปกรณ์,Serial Number,รายการ,สถานะ\n";
+        window.dashboardTableData.forEach(row => {
+            csv += `"${row.date}","${row.employee}","${row.device}","${row.sn}","${row.action}","${row.status}"\n`;
+        });
+        const link = document.createElement("a");
+        link.setAttribute("href", encodeURI(csv));
+        link.setAttribute("download", "TD_Log_Export.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      // --- Settings Functions ---
+      async function loadSettings() {
+         showSpinner(true);
+         const res = await callAPI('getSettings');
+         showSpinner(false);
+         if(res.success) {
+            document.getElementById('setting-default-emails').value = res.defaultEmails;
+            state.defaultEmails = res.defaultEmails;
+            showPage('page-settings');
+         }
+      }
+
+      async function saveSettings() {
+         const val = document.getElementById('setting-default-emails').value;
+         showSpinner(true);
+         const res = await callAPI('saveSettings', { emails: val });
+         showSpinner(false);
+         alert(res.message);
+         if(res.success) state.defaultEmails = val;
+      }
+
+      // --- Core Process ---
+      function startProcess(mode, subMode = '') {
+        state = { username: state.username, mode: mode, subMode: subMode, defaultEmails: state.defaultEmails };
+        if (mode === 'Add') {
+          document.getElementById('device-input-title').innerText = subMode === 'new' ? 'บันทึกอุปกรณ์ใหม่' : 'บันทึกอุปกรณ์หลังซ่อม';
+          document.getElementById('display-employee-name').innerText = "(ไม่ต้องระบุพนักงาน)";
+          showPage('page-device-input');
+          document.getElementById('device-scan-area').style.display = 'none';
+          document.getElementById('device-add-area').style.display = 'block';
+        } else if (mode === 'Remove' && (subMode === 'repair' || subMode === 'transfer')) {
+          const title = subMode === 'repair' ? 'ส่งซ่อมบำรุง' : 'โอนย้ายทรัพย์สิน';
+          document.getElementById('general-scan-title').innerText = title;
+          document.getElementById('general-scan-back-button').onclick = () => showPage('page-remove-menu');
+          showPage('page-general-scan');
+          startScanner('reader-general', handleGeneralScan);
+        } else {
+          document.getElementById('scan-employee-title').innerText = getTitleForMode(mode);
+          showPage('page-scan-employee');
+          startScanner('reader-employee', handleEmployeeScan);
+        }
+      }
+
+      function getTitleForMode(mode) {
+        if (mode === 'Check-Out') return 'เบิกใช้งานอุปกรณ์';
+        if (mode === 'Check-In') return 'ส่งคืนอุปกรณ์';
+        if (mode === 'Remove' && state.subMode === 'lost') return 'แจ้งสูญหาย';
+        return 'ทำรายการ';
+      }
+      
+      async function handleGeneralScan(serialNumber) {
+        showSpinner(true);
+        const res = await callAPI('getDeviceDetails', { serialNumber: serialNumber, mode: state.mode });
+        showSpinner(false);
+        if (res.found) {
+          state.deviceInfo = res;
+          const info = `${res.deviceName} (S/N: ${res.serialNumber})`;
+          if (state.subMode === 'repair') {
+            document.getElementById('repair-device-info').innerText = info;
+            showPage('page-repair-form');
+          } else if (state.subMode === 'transfer') {
+            document.getElementById('transfer-device-info').innerText = info;
+            showPage('page-transfer-form');
+          }
+        } else {
+          alert(res.message || 'ไม่พบข้อมูล');
+          startScanner('reader-general', handleGeneralScan);
+        }
+      }
+      
+      async function submitGeneralForm(type) {
+        if (type === 'repair') {
+            state.repairInfo = {
+                department: document.getElementById('repair-department').value,
+                recipient: document.getElementById('repair-recipient').value,
+                emails: document.getElementById('repair-emails').value,
+                details: document.getElementById('repair-details').value,
+            };
+        } else if (type === 'transfer') {
+            state.transferInfo = {
+                department: document.getElementById('transfer-department').value,
+                recipient: document.getElementById('transfer-recipient').value,
+                emails: document.getElementById('transfer-emails').value,
+                details: document.getElementById('transfer-details').value,
+            };
+        }
+        showSpinner(true);
+        const res = await callAPI('processGeneralAction', state);
+        showSpinner(false);
+        alert(res.message);
+        if(res.success) showPage('page-main-menu');
+      }
+
+      function startScanner(elementId, successCallback) {
+        const scanner = new Html5Qrcode(elementId);
+        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, 
+          (text) => { scanner.stop(); successCallback(text); }, 
+          () => {}
+        ).catch(err => {});
+        if(elementId === 'reader-employee') employeeScanner = scanner; 
+        else if (elementId === 'reader-device') deviceScanner = scanner;
+        else generalScanner = scanner;
+      }
+      
+      function stopAllScanners() {
+        try { if (employeeScanner && employeeScanner.isScanning) employeeScanner.stop(); } catch(e) {}
+        try { if (deviceScanner && deviceScanner.isScanning) deviceScanner.stop(); } catch(e) {}
+        try { if (generalScanner && generalScanner.isScanning) generalScanner.stop(); } catch(e) {}
+      }
+
+      async function handleEmployeeScan(employeeId) {
+        showSpinner(true);
+        const res = await callAPI('getEmployeeDetails', { employeeId: employeeId });
+        showSpinner(false);
+        if (res.found) {
+          state.employeeInfo = res;
+          if (state.mode === 'Remove' && state.subMode === 'lost') {
+            document.getElementById('display-employee-name-lost').innerText = `${res.fullName} (${res.employeeId})`;
+            showPage('page-lost-input');
+          } else {
+            document.getElementById('display-employee-name').innerText = `${res.fullName} (${res.employeeId})`;
+            document.getElementById('device-input-title').innerText = getTitleForMode(state.mode);
+            showPage('page-device-input');
+            document.getElementById('device-scan-area').style.display = 'block';
+            document.getElementById('device-add-area').style.display = 'none';
+            startScanner('reader-device', handleDeviceScan);
+          }
+        } else {
+          alert(res.message); startScanner('reader-employee', handleEmployeeScan);
+        }
+      }
+      
+      async function handleDeviceScan(serialNumber) {
+        showSpinner(true);
+        const res = await callAPI('getDeviceDetails', { serialNumber: serialNumber, mode: state.mode });
+        showSpinner(false);
+        
+        if (res.found) {
+          state.deviceInfo = res;
+          prepareConfirmationPage();
+          if (res.warning_message) {
+            alert('คำเตือน: ' + res.warning_message);
+            document.getElementById('remark').value = res.warning_message;
+          }
+        }
+        else { alert(res.message); startScanner('reader-device', handleDeviceScan); }
+      }
+      
+      function handleNewDeviceInput() {
+          const sn = document.getElementById('new-device-sn').value.trim();
+          const name = document.getElementById('new-device-name').value.trim();
+          if (!sn || !name) { alert('กรุณากรอกข้อมูล'); return; }
+          state.newDeviceInfo = { serialNumber: sn, deviceName: name };
+          prepareConfirmationPage();
+      }
+
+      function handleLostDeviceInput() {
+          const sn = document.getElementById('lost-device-sn').value.trim();
+          const name = document.getElementById('lost-device-name').value.trim();
+          if (!sn || !name) { alert('กรุณากรอกข้อมูล'); return; }
+          state.lostDeviceInfo = { serialNumber: sn, deviceName: name };
+          state.isEmployeeFault = true;
+          prepareInvestigationPage('lost');
+      }
+
+      function prepareConfirmationPage() {
+        document.getElementById('confirm-mode').innerText = getTitleForMode(state.mode);
+        const emp = state.employeeInfo || {};
+        document.getElementById('confirm-employee').innerText = emp.fullName ? `${emp.fullName} (${emp.employeeId})` : '-';
+        const dev = state.deviceInfo || state.newDeviceInfo || {};
+        document.getElementById('confirm-device-name').innerText = dev.deviceName || '-';
+        document.getElementById('confirm-device-sn').innerText = dev.serialNumber || '-';
+        
+        document.getElementById('confirm-device-condition').innerText = dev.condition || '-';
+        const conditionListItem = document.getElementById('condition-list-item');
+        if ((state.mode === 'Check-In' || state.mode === 'Check-Out') && state.deviceInfo) {
+            conditionListItem.style.display = 'list-item';
+        } else {
+            conditionListItem.style.display = 'none';
+        }
+        
+        document.getElementById('checklist-area').style.display = (state.mode === 'Check-In') ? 'block' : 'none';
+        document.getElementById('employee-fault-area').style.display = 'none';
+        
+        showPage('page-confirm');
+      }
+      
+      document.getElementById('checklist-area').addEventListener('change', () => {
+        const hasDamage = Array.from(document.querySelectorAll('#checklist-area input:checked')).length > 0;
+        document.getElementById('employee-fault-area').style.display = hasDamage ? 'block' : 'none';
+      });
+
+      async function submitTransaction() {
+        state.remark = document.getElementById('remark').value;
+        state.checklist = {
+          screenDamaged: document.getElementById('check1').checked, rubberWorn: document.getElementById('check2').checked,
+          buttonsDamaged: document.getElementById('check3').checked, noPower: document.getElementById('check4').checked,
+          batteryDegraded: document.getElementById('check5').checked, touchscreenFail: document.getElementById('check6').checked,
+          softwareError: document.getElementById('check7').checked, otherAccident: document.getElementById('check8').checked
+        };
+        state.isEmployeeFault = document.getElementById('employee-fault-checkbox').checked;
+        
+        if (state.mode === 'Check-In' && Object.values(state.checklist).some(v => v)) {
+            startPhotoCaptureProcess();
+            return;
+        }
+        
+        showSpinner(true);
+        const res = await callAPI('processTransaction', state);
+        showSpinner(false);
+        alert(res.message);
+        if (res.success) showPage('page-main-menu');
+      }
+
+      async function startCamera() {
+          try {
+              cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+              document.getElementById('camera-feed').srcObject = cameraStream;
+          } catch (err) { alert('ไม่สามารถเปิดกล้องได้ หากใช้ในแอป LINE ให้เปิดในเบราว์เซอร์ปกติ'); }
+      }
+      function stopCamera() { if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); }
+      function startPhotoCaptureProcess() { showPage('page-photo-capture'); retakePhoto(); }
+      
+      function capturePhoto() {
+          const video = document.getElementById('camera-feed');
+          const canvas = document.getElementById('photo-canvas');
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          canvas.getContext('2d').drawImage(video, 0, 0);
+          document.getElementById('photo-preview').src = canvas.toDataURL('image/jpeg');
+          video.classList.add('d-none'); document.getElementById('photo-preview').classList.remove('d-none');
+          document.getElementById('capture-controls').classList.add('d-none'); document.getElementById('confirm-controls').classList.remove('d-none');
+          stopCamera();
+      }
+      function retakePhoto() {
+          document.getElementById('camera-feed').classList.remove('d-none');
+          document.getElementById('photo-preview').classList.add('d-none');
+          document.getElementById('capture-controls').classList.remove('d-none'); document.getElementById('confirm-controls').classList.add('d-none');
+          startCamera();
+      }
+      
+      async function confirmPhoto() {
+          state.imageData = document.getElementById('photo-canvas').toDataURL('image/jpeg').split(',')[1];
+          // ดึง Default Email ถ้ายังไม่เคยดึง
+          if(!state.defaultEmails) {
+             const res = await callAPI('getSettings');
+             if(res.success) state.defaultEmails = res.defaultEmails;
+          }
+          prepareInvestigationPage('damaged');
+      }
+
+      function prepareInvestigationPage(type) {
+          state.investigation = { type: type };
+          const dev = state.deviceInfo || state.lostDeviceInfo || {};
+          document.getElementById('investigation-employee').innerText = `${state.employeeInfo.fullName} (${state.employeeInfo.employeeId})`;
+          document.getElementById('investigation-device').innerText = `${dev.deviceName} (S/N: ${dev.serialNumber})`;
+          
+          // กำหนด Email ให้เป็นไปตาม Settings ที่ดึงมา
+          if(state.defaultEmails) {
+              document.getElementById('recipient-emails').value = state.defaultEmails;
+          }
+
+          showPage('page-investigation');
+      }
+      
+      async function submitInvestigation() {
+          showSpinner(true);
+          state.investigation.recipients = document.getElementById('recipient-emails').value;
+          state.investigation.details = document.getElementById('interview-details').value;
+          state.investigation.cause = document.getElementById('investigation-cause').value;
+          state.investigation.location = document.getElementById('investigation-location').value;
+          state.investigation.supervisorInterviewee = document.getElementById('supervisor-interviewee').value;
+          
+          const res = await callAPI('createAndSendInvestigation', state);
+          showSpinner(false);
+          alert(res.message);
+          if (res.success) showPage('page-main-menu');
+      }
+      
+      // ดึงการตั้งค่าครั้งแรกเบื้องหลัง
+      callAPI('getSettings').then(res => { if(res.success) state.defaultEmails = res.defaultEmails; });
+    </script>
+</body>
+</html>
